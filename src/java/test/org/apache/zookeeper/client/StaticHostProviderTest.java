@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.zookeeper.test;
+package org.apache.zookeeper.client;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertNotSame;
@@ -102,12 +102,52 @@ public class StaticHostProviderTest extends ZKTestCase {
             InetSocketAddress next = hostProvider.next(0);
             assertTrue(next instanceof InetSocketAddress);
             assertTrue(!next.isUnresolved());
-            assertTrue("Did not match "+ next.toString(), !next.toString().startsWith("/"));
+            assertTrue("InetSocketAddress must not have hostname part " +
+                       next.toString(), next.toString().startsWith("/"));
             // Do NOT trigger the reverse name service lookup.
             String hostname = next.getHostName();
             // In this case, the hostname equals literal IP address.
             hostname.equals(next.getAddress().getHostAddress());
         }
+    }
+
+    @Test
+    public void testReResolving() throws UnknownHostException {
+        byte size = 1;
+        ArrayList<InetSocketAddress> list = new ArrayList<InetSocketAddress>(size);
+
+        // Test a hostname that resolves to multiple addresses
+        list.add(InetSocketAddress.createUnresolved("www.apache.org", 1234));
+        StaticHostProvider hostProvider = new StaticHostProvider(list);
+        InetSocketAddress next = hostProvider.next(0);
+        next = hostProvider.next(0);
+        assertTrue("No address was removed", hostProvider.getNextRemoved() > 0);
+        assertTrue("No address was added", hostProvider.getNextAdded() > 0);
+
+        // Test a hostname that resolves to a single address
+        list.clear();
+        list.add(InetSocketAddress.createUnresolved("issues.apache.org", 1234));
+        hostProvider = new StaticHostProvider(list);
+        next = hostProvider.next(0);
+        next = hostProvider.next(0);
+        assertTrue("No address was removed", hostProvider.getNextRemoved() > 0);
+        assertTrue("No address was added", hostProvider.getNextAdded() > 0);
+    }
+
+    @Test
+    public void testReResolvingLocalhost() throws UnknownHostException {
+        byte size = 2;
+        ArrayList<InetSocketAddress> list = new ArrayList<InetSocketAddress>(size);
+
+        // Test a hostname that resolves to multiple addresses
+        list.add(InetSocketAddress.createUnresolved("localhost", 1234));
+        list.add(InetSocketAddress.createUnresolved("localhost", 1235));
+        StaticHostProvider hostProvider = new StaticHostProvider(list);
+        int sizeBefore = hostProvider.size();
+        InetSocketAddress next = hostProvider.next(0);
+        next = hostProvider.next(0);
+        assertTrue("Different number of addresses in the list: " + hostProvider.size() +
+                " (after), " + sizeBefore + " (before)", hostProvider.size() == sizeBefore);
     }
 
     private StaticHostProvider getHostProviderUnresolved(byte size)
@@ -118,7 +158,7 @@ public class StaticHostProviderTest extends ZKTestCase {
     private Collection<InetSocketAddress> getUnresolvedServerAddresses(byte size) {
         ArrayList<InetSocketAddress> list = new ArrayList<InetSocketAddress>(size);
         while (size > 0) {
-            list.add(InetSocketAddress.createUnresolved("10.10.10." + size, 1234 + size));
+            list.add(InetSocketAddress.createUnresolved("192.0.2." + size, 1234 + size));
             --size;
         }
         return list;
@@ -130,7 +170,7 @@ public class StaticHostProviderTest extends ZKTestCase {
                 size);
         while (size > 0) {
             try {
-                list.add(new InetSocketAddress(InetAddress.getByAddress(new byte[]{10, 10, 10, size}), 1234 + size));
+                list.add(new InetSocketAddress(InetAddress.getByAddress(new byte[]{-64, 0, 2, size}), 1234 + size));
             } catch (UnknownHostException e) {
                 LOG.error("Exception while resolving address", e);
                 fail("Failed to resolve address");
